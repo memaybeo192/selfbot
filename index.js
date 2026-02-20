@@ -6,18 +6,90 @@ const osu = require('os-utils');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const si = require('systeminformation');
 const Database = require('better-sqlite3');
 const config = require('./config.json');
 
 const client = new Client({ checkUpdate: false });
-const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+const genAI  = new GoogleGenerativeAI(config.geminiApiKey);
+
+// Primary model + 2-tier fallback — auto-switch on quota/ratelimit
+const MODEL_PRIMARY   = 'gemini-3-flash-preview';
+const MODEL_FALLBACK1 = 'gemini-2.5-flash';
+const MODEL_FALLBACK2 = 'gemini-2.5-flash-lite';
+let   currentModel    = genAI.getGenerativeModel({ model: MODEL_PRIMARY });
+let   fallbackTier    = 0; // 0 = primary, 1 = fallback1, 2 = fallback2
+
+async function generateContent(payload) {
+    try {
+        return await currentModel.generateContent(payload);
+    } catch (err) {
+        const msg = err?.message?.toLowerCase() || '';
+        const isQuota = msg.includes('quota') || msg.includes('429') || msg.includes('rate') || msg.includes('resource_exhausted');
+        if (isQuota && fallbackTier < 2) {
+            fallbackTier++;
+            const next = fallbackTier === 1 ? MODEL_FALLBACK1 : MODEL_FALLBACK2;
+            currentModel = genAI.getGenerativeModel({ model: next });
+            sessionLog(`⚠️ [AI] Quota/ratelimit — switched to tier ${fallbackTier}: ${next}`);
+            console.warn(`⚠️ [AI] Switched to tier ${fallbackTier}: ${next}`);
+            return await currentModel.generateContent(payload);
+        }
+        throw err;
+    }
+}
 
 const downloadFolder = path.join(__dirname, 'downloads');
-const logFolder = path.join(__dirname, 'logs');
+const logFolder      = path.join(__dirname, 'logs');
 if (!fs.existsSync(downloadFolder)) fs.mkdirSync(downloadFolder);
-if (!fs.existsSync(logFolder)) fs.mkdirSync(logFolder);
+if (!fs.existsSync(logFolder))      fs.mkdirSync(logFolder);
+
+// ================================================================
+// SESSION LOGGER
+// Each bot run = 1 txt file: logs/session_YYYY-MM-DD_HH-mm-ss.txt
+// On startup, compress all previous uncompressed session files → .gz
+// ================================================================
+const sessionFile = path.join(logFolder, `session_${moment().format('YYYY-MM-DD_HH-mm-ss')}.txt`);
+const sessionStream = fs.createWriteStream(sessionFile, { flags: 'a' });
+
+function sessionLog(line) {
+    const ts = moment().format('HH:mm:ss');
+    sessionStream.write(`[${ts}] ${line}\n`);
+}
+
+// Compress old session txt files from previous runs
+function compressOldSessions() {
+    try {
+        const files = fs.readdirSync(logFolder).filter(f =>
+            f.startsWith('session_') && f.endsWith('.txt') && path.join(logFolder, f) !== sessionFile
+        );
+        for (const file of files) {
+            const src  = path.join(logFolder, file);
+            const dest = src + '.gz';
+            if (fs.existsSync(dest)) { fs.unlinkSync(src); continue; }
+            const input  = fs.createReadStream(src);
+            const output = fs.createWriteStream(dest);
+            input.pipe(zlib.createGzip()).pipe(output);
+            output.on('finish', () => {
+                fs.unlinkSync(src);
+                console.log(`📦 Compressed old session: ${file}.gz`);
+            });
+        }
+    } catch (e) {
+        console.warn('⚠️ Could not compress old sessions:', e.message);
+    }
+}
+
+compressOldSessions();
+
+// Patch console → also write to session file (strip ANSI escape codes for clean txt)
+const stripAnsi = (s) => String(s).replace(/\x1B\[[0-9;]*m/g, '');
+const _log   = console.log.bind(console);
+const _warn  = console.warn.bind(console);
+const _error = console.error.bind(console);
+console.log   = (...a) => { _log(...a);   sessionLog(a.map(stripAnsi).join(' ')); };
+console.warn  = (...a) => { _warn(...a);  sessionLog('[WARN] ' + a.map(stripAnsi).join(' ')); };
+console.error = (...a) => { _error(...a); sessionLog('[ERROR] ' + a.map(stripAnsi).join(' ')); };
 
 // ================================================================
 // DATABASE
@@ -422,7 +494,7 @@ Trả lời ngắn gọn thôi (1-2 câu), nhớ mention lý do chủ mày bận
 
             if (images.length > 0) parts[0].text += '\n(Nếu có ảnh, hãy nhận xét/phản ứng về ảnh đó theo đúng tính cách của mày.)';
 
-            const result   = await model.generateContent({ contents: [{ role: 'user', parts }] });
+            const result   = await generateContent({ contents: [{ role: 'user', parts }] });
             const botReply = result.response.text();
             await message.reply(botReply + BOT_MARKER);
             console.log(`🤖 [AFK/BOT] Đã reply ${message.author.tag}: ${botReply.substring(0, 80)}${botReply.length > 80 ? '...' : ''}`);
@@ -466,7 +538,7 @@ ${config.prefix}cleandl      :: Xóa file trong folder downloads
         if (!question) return message.edit("❌ Ví dụ: .ask Hôm nay ăn gì?");
         await message.edit(`🤔 **Đang nghĩ:** "${question}"...`);
         try {
-            const result = await model.generateContent(`Bạn là AI thông minh. Hãy trả lời ngắn gọn: ${question}`);
+            const result = await generateContent(`Bạn là AI thông minh. Hãy trả lời ngắn gọn: ${question}`);
             let res = result.response.text();
             const header = `❓ **${question}**\n🤖 `;
             res = res.length > 1900 - header.length ? res.substring(0, 1900 - header.length) + "..." : res;
@@ -621,7 +693,7 @@ Cache   : ${recentMsgCache.size} channels | Theo dõi: ${activeGuilds.size}/${TO
         if (!textToTranslate) return message.edit("❌ Reply vào tin nhắn cần dịch, hoặc: `.tr en [text]`").catch(() => {});
         await message.edit(`🔄 Đang dịch...`);
         try {
-            const result     = await model.generateContent(`Dịch đoạn văn sau sang "${targetLang}". Chỉ trả về bản dịch, không giải thích, không thêm gì khác:\n\n${textToTranslate}`);
+            const result     = await generateContent(`Dịch đoạn văn sau sang "${targetLang}". Chỉ trả về bản dịch, không giải thích, không thêm gì khác:\n\n${textToTranslate}`);
             const translated = result.response.text().trim();
             const source     = replyMsg ? `\n> ${textToTranslate.substring(0, 80)}${textToTranslate.length > 80 ? '...' : ''}` : '';
             await message.edit(`🌐 **[${targetLang.toUpperCase()}]**${source}\n${translated}`);
@@ -757,7 +829,7 @@ async function handleConsoleCommand(input) {
         if (isOnCooldown('console', 'ask', 5000)) return console.log('⏳ Chờ 5 giây!');
         console.log(`🤔 Đang hỏi AI...`);
         try {
-            const result = await model.generateContent(`Bạn là AI thông minh. Hãy trả lời ngắn gọn: ${question}`);
+            const result = await generateContent(`Bạn là AI thông minh. Hãy trả lời ngắn gọn: ${question}`);
             console.log(`🤖 ${result.response.text().trim()}`);
         } catch (e) { console.error('❌ AI error:', e.message); }
     }
@@ -770,7 +842,7 @@ async function handleConsoleCommand(input) {
         if (isOnCooldown('console', 'translate', 4000)) return console.log('⏳ Chờ 4 giây!');
         console.log(`🔄 Đang dịch...`);
         try {
-            const result = await model.generateContent(`Dịch sang "${lang}". Chỉ trả về bản dịch:\n\n${text}`);
+            const result = await generateContent(`Dịch sang "${lang}". Chỉ trả về bản dịch:\n\n${text}`);
             console.log(`🌐 [${lang.toUpperCase()}] ${result.response.text().trim()}`);
         } catch (e) { console.error('❌ Translate error:', e.message); }
     }
