@@ -1,0 +1,6 @@
+{
+    "token": "YOUR_DISCORD_TOKEN_HERE",
+    "ownerId": "YOUR_DISCORD_USER_ID_HERE",
+    "prefix": ".",
+    "geminiApiKey": "YOUR_GEMINI_API_KEY_HERE"
+}
