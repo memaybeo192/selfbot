@@ -1,4 +1,4 @@
-# Selfbot V3
+# Discord Selfbot
 
 Discord selfbot with Gemini AI auto-reply, snipe, status persistence, and console CLI.
 
