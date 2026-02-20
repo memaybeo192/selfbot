@@ -15,17 +15,42 @@ const client = new Client({ checkUpdate: false });
 const genAI  = new GoogleGenerativeAI(config.geminiApiKey);
 
 // Primary model + 2-tier fallback — auto-switch on quota/ratelimit
+// Auto-restore: sau 60 phút sẽ thử lại primary, nếu ok thì về tier 0
 const MODEL_PRIMARY   = 'gemini-3-flash-preview';
 const MODEL_FALLBACK1 = 'gemini-2.5-flash';
 const MODEL_FALLBACK2 = 'gemini-2.5-flash-lite';
-let   currentModel    = genAI.getGenerativeModel({ model: MODEL_PRIMARY });
-let   fallbackTier    = 0; // 0 = primary, 1 = fallback1, 2 = fallback2
+const RESTORE_AFTER_MS = 60 * 60 * 1000; // thử restore về primary sau 60 phút
+
+let currentModel  = genAI.getGenerativeModel({ model: MODEL_PRIMARY });
+let fallbackTier  = 0;
+let restoreTimer  = null;
+
+function scheduleRestore() {
+    if (restoreTimer) return; // đã có timer rồi, không đặt lại
+    restoreTimer = setTimeout(async () => {
+        restoreTimer = null;
+        if (fallbackTier === 0) return; // đã ở primary rồi
+        try {
+            const probe = genAI.getGenerativeModel({ model: MODEL_PRIMARY });
+            await probe.generateContent('ping');
+            currentModel = probe;
+            fallbackTier = 0;
+            sessionLog(`✅ [AI] Restored to primary: ${MODEL_PRIMARY}`);
+            console.log(`✅ [AI] Restored to primary: ${MODEL_PRIMARY}`);
+        } catch (_) {
+            // Primary vẫn còn quota → giữ tier hiện tại, lên lịch thử lại lần nữa
+            sessionLog(`⚠️ [AI] Primary still unavailable — retry in 60 min`);
+            console.warn(`⚠️ [AI] Primary still unavailable — retry in 60 min`);
+            scheduleRestore();
+        }
+    }, RESTORE_AFTER_MS);
+}
 
 async function generateContent(payload) {
     try {
         return await currentModel.generateContent(payload);
     } catch (err) {
-        const msg = err?.message?.toLowerCase() || '';
+        const msg     = err?.message?.toLowerCase() || '';
         const isQuota = msg.includes('quota') || msg.includes('429') || msg.includes('rate') || msg.includes('resource_exhausted');
         if (isQuota && fallbackTier < 2) {
             fallbackTier++;
@@ -33,6 +58,7 @@ async function generateContent(payload) {
             currentModel = genAI.getGenerativeModel({ model: next });
             sessionLog(`⚠️ [AI] Quota/ratelimit — switched to tier ${fallbackTier}: ${next}`);
             console.warn(`⚠️ [AI] Switched to tier ${fallbackTier}: ${next}`);
+            scheduleRestore(); // bắt đầu đếm ngược về primary
             return await currentModel.generateContent(payload);
         }
         throw err;
