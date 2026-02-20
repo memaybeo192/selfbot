@@ -97,9 +97,8 @@ function saveStatusState() {
     dbSet.run('user_status', JSON.stringify(statusState));
 }
 
-// Reapply mỗi 15 giây — Discord client (phone/PC) liên tục push presence của nó,
-// bot cần đánh lại đủ nhanh để thắng
-setInterval(() => applyStatus(statusState.status), 15 * 1000);
+// Apply ngay lập tức khi set, interval 2 phút chỉ để chống Discord server tự reset
+setInterval(() => applyStatus(statusState.status), 2 * 60 * 1000);
 
 for (const row of db.prepare('SELECT * FROM snipe_history').all()) {
     snipeMap.set(row.channel_id, {
@@ -238,13 +237,40 @@ async function initActivityFromHistory() {
     console.log(`✅ Whitelist tự động: [${[...activeGuilds].map(id => guildActivity.get(id)?.name).join(', ')}]`);
 }
 
-function cacheMessage(message) {
+// Map lưu file đã pre-download: messageId → fileName
+const predownloadedFiles = new Map();
+
+async function cacheMessage(message) {
     if (!message.author || message.author.bot) return;
     if (message.guildId && !activeGuilds.has(message.guildId)) return;
     if (!recentMsgCache.has(message.channelId)) recentMsgCache.set(message.channelId, []);
     const arr = recentMsgCache.get(message.channelId);
-    arr.push({ id: message.id, content: message.content, author: message.author, attachments: message.attachments, time: moment().format('HH:mm:ss') });
-    if (arr.length > MSG_CACHE_LIMIT) arr.shift();
+
+    // Pre-download ảnh/file ngay khi message tới — CDN URL còn sống
+    // Nếu đợi đến lúc messageDelete thì URL đã 404
+    let preFile = null;
+    const attachments     = message.attachments;
+    const firstAttachment = attachments?.first ? attachments.first() : (attachments?.values ? [...attachments.values()][0] : null);
+    if (firstAttachment && firstAttachment.size <= 8388608) {
+        try {
+            const extension = path.extname(firstAttachment.name) || '.png';
+            const fileName  = `snipe_${moment().format('HH-mm-ss')}_${message.author.username}${extension}`;
+            const filePath  = path.join(downloadFolder, fileName);
+            const response  = await axios({ method: 'GET', url: firstAttachment.url, responseType: 'stream' });
+            const writer    = fs.createWriteStream(filePath);
+            response.data.pipe(writer);
+            await new Promise((res, rej) => { writer.on('finish', res); writer.on('error', rej); });
+            preFile = fileName;
+            predownloadedFiles.set(message.id, fileName);
+        } catch (_) {}
+    }
+
+    arr.push({ id: message.id, content: message.content, author: message.author, attachments: message.attachments, preFile, time: moment().format('HH:mm:ss') });
+    if (arr.length > MSG_CACHE_LIMIT) {
+        const removed = arr.shift();
+        // Xóa file pre-download nếu message cũ bị đẩy ra khỏi cache (không bị xóa)
+        if (removed?.preFile) predownloadedFiles.delete(removed.id);
+    }
 }
 
 // Dọn file cũ hơn 48h trong downloads mỗi 12 tiếng
@@ -294,25 +320,9 @@ client.on('messageDelete', async (message) => {
 
     if (!source.author || source.author.bot) return;
 
-    let savedFile = null;
-    const attachments     = source.attachments;
-    const firstAttachment = attachments?.first ? attachments.first() : (attachments?.values ? [...attachments.values()][0] : null);
-
-    if (firstAttachment && firstAttachment.size <= 8388608) {
-        try {
-            const extension = path.extname(firstAttachment.name) || '.png';
-            const fileName  = `snipe_${moment().format('HH-mm-ss')}_${source.author.username}${extension}`;
-            const filePath  = path.join(downloadFolder, fileName);
-            const response  = await axios({ method: 'GET', url: firstAttachment.url, responseType: 'stream' });
-            const writer    = fs.createWriteStream(filePath);
-            response.data.pipe(writer);
-            await new Promise((res, rej) => { writer.on('finish', res); writer.on('error', rej); });
-            savedFile = fileName;
-            console.log(`📥 [SNIPE] Đã lưu file của ${source.author.username}: ${fileName}`);
-        } catch (err) {
-            console.warn(`⚠️ [SNIPE] Không tải được file: ${err.message}`);
-        }
-    }
+    // File đã được tải trước trong cacheMessage — lấy ra dùng luôn, không tải lại (CDN đã 404)
+    const savedFile = cached?.preFile || null;
+    predownloadedFiles.delete(message.id);
 
     snipeMap.set(message.channelId, {
         content: source.content,
@@ -345,7 +355,7 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
 });
 
 client.on('messageCreate', async (message) => {
-    cacheMessage(message);
+    await cacheMessage(message);
     trackActivity(message);
 
     const isCommand    = message.content.startsWith(config.prefix);
@@ -675,9 +685,11 @@ const readline = require('readline');
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
 
 async function handleConsoleCommand(input) {
-    const parts   = input.trim().split(/ +/);
-    const command = parts[0]?.toLowerCase();
-    const args    = parts.slice(1);
+    // Strip leading prefix if user accidentally types it in console
+    const stripped = input.trim().replace(/^[.!,/]/, '');
+    const parts    = stripped.split(/ +/);
+    const command  = parts[0]?.toLowerCase();
+    const args     = parts.slice(1);
 
     if (!command) return;
 
