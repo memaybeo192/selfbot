@@ -9,7 +9,7 @@ Discord selfbot with Gemini AI auto-reply, snipe, status persistence, and consol
 ### 1. Install dependencies
 
 ```bash
-npm install discord.js-selfbot-v13 @google/generative-ai moment os-utils axios systeminformation better-sqlite3
+npm install discord.js-selfbot-v13 @google/generative-ai moment os-utils axios systeminformation better-sqlite3 debug
 ```
 
 ### 2. Configure `config.json`
