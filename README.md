@@ -41,14 +41,14 @@
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
+git clone https://github.com/memaybeo192/selfbot.git
+cd selfbot
 
 # 2. Cài dependencies
 npm install
 
 # 3. Cấu hình
-cp config.template.json config.json
+cp config.json
 # Mở config.json và điền token + API keys
 
 # 4. Chạy
@@ -59,7 +59,7 @@ node index.js
 
 ## ⚙️ Cấu hình (`config.json`)
 
-Sao chép file `config.template.json` thành `config.json` và điền thông tin:
+Điền thông tin vào config.json:
 
 ```jsonc
 {
@@ -81,7 +81,6 @@ Sao chép file `config.template.json` thành `config.json` và điền thông ti
 }
 ```
 
-> Xem `config.template.json` để biết đầy đủ tất cả options bao gồm `models` và `tuning`.
 
 ### Lấy Discord Token
 
