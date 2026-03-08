@@ -1,6 +1,57 @@
 {
-    "token": "YOUR_DISCORD_TOKEN_HERE",
-    "ownerId": "YOUR_DISCORD_USER_ID_HERE",
-    "prefix": ".",
-    "geminiApiKey": "YOUR_GEMINI_API_KEY_HERE"
+  "token": "YOUR_DISCORD_TOKEN_HERE",
+
+  "prefix": ".",
+  "ownerId": "YOUR_DISCORD_USER_ID_HERE",
+
+  "geminiApiKeys": [
+    "YOUR_GEMINI_FREE_KEY_1",
+    "YOUR_GEMINI_FREE_KEY_2"
+  ],
+
+  "paidApiKeys": [
+    "YOUR_GEMINI_PAID_KEY_1"
+  ],
+
+  "models": {
+    "_comment": "Xóa dòng này. Thay tên model nếu Google deprecate preview models.",
+    "primary": "gemini-3-flash-preview",
+    "fallback1": "gemini-3.1-flash-lite-preview",
+    "pro": "gemini-3.1-pro-preview",
+    "imageGen": "gemini-3-pro-image-preview",
+    "imageGenFallback": "gemini-3.1-flash-image-preview"
+  },
+
+  "useTavily": true,
+  "tavilyApiKeys": [
+    "YOUR_TAVILY_KEY_1",
+    "YOUR_TAVILY_KEY_2"
+  ],
+
+  "snipePredownload": true,
+
+  "tuning": {
+    "_comment": "Xóa dòng này. Tất cả giá trị đều có default — chỉ override khi cần.",
+    "keyRecoverMinutes": 120,
+    "spamRetryWindowMin": 5,
+    "spamPollSeconds": 15,
+    "msgCtxPerSource": 200,
+    "msgCtxGlobal": 5000,
+    "masterMaxHistory": 40,
+    "afkMaxHistory": 20,
+    "retryIntervalMin": 10,
+    "retryCooldownBurst": 5,
+    "retryCooldownMin": 30,
+    "spamSilenceMin": 30,
+    "spamDetectWindowMin": 2,
+    "spamThreshold": 5,
+    "purgeDeleteDelayMs": 800,
+    "translateCooldownMs": 4000,
+    "askCooldownMs": 8000,
+    "noticeAutoDeleteMs": 1000,
+    "noituMsgAutoDeleteMs": 3000,
+    "noituStartDeleteMs": 5000,
+    "repliedMsgTtlHours": 2,
+    "rebuildGuildsDebounceMs": 5000
+  }
 }
