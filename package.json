@@ -1,0 +1,24 @@
+{
+  "name": "selfbot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/genai": "^1.42.0",
+    "@google/generative-ai": "^0.24.1",
+    "@tavily/core": "^0.7.2",
+    "axios": "^1.13.5",
+    "better-sqlite3": "^12.6.2",
+    "debug": "^4.4.3",
+    "discord.js-selfbot-v13": "^3.7.1",
+    "moment": "^2.30.1",
+    "os-utils": "^0.0.14",
+    "systeminformation": "^5.31.1"
+  }
+}
