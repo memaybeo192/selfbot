@@ -1625,15 +1625,6 @@ async function noituFindLastWord(channel) {
         if (!fetched) return null;
         const msgs = [...fetched.values()].sort((a, b) => b.createdTimestamp - a.createdTimestamp);
 
-        // Pass 0: ưu tiên từ đầu trận mới nhất từ Neko bot (message "bắt đầu với từ **...**")
-        for (const msg of msgs) {
-            const m = (msg.content || '').match(/bắt đầu với từ[:\s]+\*\*(.+?)\*\*/i);
-            if (m) {
-                const word = m[1].trim().toLowerCase().normalize('NFC');
-                if (_isValidNoituWord(word))
-                    return { word, messageId: msg.id, authorId: msg.author.id };
-            }
-        }
         // Helper: check accepted reaction (✅ hoặc check_nk)
         const _hasAccept = (msg) => {
             if (msg.reactions?.cache?.get('✅')?.count > 0) return true;
@@ -1662,6 +1653,15 @@ async function noituFindLastWord(channel) {
             if (!_isValidNoituWord(content)) continue;
             if (_hasDeny(msg)) continue;
             return { word: content.toLowerCase(), messageId: msg.id, authorId: msg.author.id };
+        }
+        // Pass 3: fallback cuối — lấy từ đầu trận mới từ Neko nếu không có gì khác
+        for (const msg of msgs) {
+            const m = (msg.content || '').match(/bắt đầu với từ[:\s]+\*\*(.+?)\*\*/i);
+            if (m) {
+                const word = m[1].trim().toLowerCase().normalize('NFC');
+                if (_isValidNoituWord(word))
+                    return { word, messageId: msg.id, authorId: msg.author.id };
+            }
         }
         return null;
     } catch (err) {
@@ -1857,8 +1857,17 @@ async function noituTakeTurn(channelId) {
             return;
         }
 
-        const needSyl = _noituLastSyl(session.lastWord);
         if (!(session.usedWords instanceof Set)) session.usedWords = new Set();
+
+        // Sync lastWord: scan channel tìm từ accepted mới nhất (tránh bị stale khi deny loop)
+        const _latestFound = await noituFindLastWord(channel);
+        if (_latestFound && _latestFound.word !== session.lastBotWord && _latestFound.word !== session.lastWord) {
+            console.log(`🔄 [NOITU] lastWord sync: "${session.lastWord}" → "${_latestFound.word}"`);
+            session.lastWord     = _latestFound.word;
+            session.pendingWords = [];
+        }
+
+        const needSyl = _noituLastSyl(session.lastWord);
 
         // 1. Thử whitelist DB trước — tức thì, không cần AI
         const wlRows = dbNoituWLGet.all(needSyl);
